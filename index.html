@@ -526,8 +526,10 @@ button { font-family: inherit; cursor: pointer; }
        payload.screen_h=screen.height;
        payload.viewport_w=innerWidth;
        payload.viewport_h=innerHeight;
-       var params=new URLSearchParams(location.search);
-       payload.meta={env:env,utm_source:params.get('utm_source')||params.get('src')||'',utm_medium:params.get('utm_medium')||'',utm_campaign:params.get('utm_campaign')||''};
+        var params=new URLSearchParams(location.search);
+        var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch(e){}
+        var lang=(navigator.language||navigator.userLanguage||'').substring(0,10);
+        payload.meta={env:env,tz:tz,lang:lang,utm_source:params.get('utm_source')||params.get('src')||'',utm_medium:params.get('utm_medium')||'',utm_campaign:params.get('utm_campaign')||''};
        fetch(EP,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true,credentials:'omit'}).catch(function(){});
      }
 
@@ -538,7 +540,51 @@ button { font-family: inherit; cursor: pointer; }
          sessionStorage.setItem(viewKey,'1');
          send({event_type:'view'});
        }
-     }
+      }
+
+      // Block view tracking via IntersectionObserver
+      var blockViewKey='tapio_bv_'+sid+'_';
+      if('IntersectionObserver' in window){
+        var obs=new IntersectionObserver(function(entries){
+          entries.forEach(function(entry){
+            if(!entry.isIntersecting)return;
+            var b=entry.target;
+            var bid=b.getAttribute('data-tapio-block-id');
+            if(!bid)return;
+            var bvk=blockViewKey+bid;
+            if(sessionStorage.getItem(bvk))return;
+            sessionStorage.setItem(bvk,'1');
+            send({
+              event_type:'block_view',
+              block_id:bid,
+              block_type:b.getAttribute('data-tapio-block-type'),
+              block_title:(b.getAttribute('data-tapio-block-title')||(function(){var h=b.querySelector('h3,h2,h1,.card-title');return h?(h.textContent||'').trim().substring(0,120):null;})()),
+              block_index:b.getAttribute('data-tapio-block-index')?parseInt(b.getAttribute('data-tapio-block-index')):null
+            });
+          });
+        },{threshold:0.3});
+        setTimeout(function(){
+          document.querySelectorAll('[data-tapio-block-id]').forEach(function(el){obs.observe(el);});
+        },500);
+      }
+
+      // FAQ expand tracking
+      document.addEventListener('click',function(e){
+        var detail=e.target.closest('[data-tapio-block-type="FAQAccordion"] [data-state]');
+        if(!detail)return;
+        var bc=detail.closest('[data-tapio-block-id]');
+        if(!bc)return;
+        var question=(detail.querySelector('button')||detail).textContent||'';
+        question=question.trim().substring(0,120);
+        send({
+          event_type:'faq_expand',
+          block_id:bc.getAttribute('data-tapio-block-id'),
+          block_type:'FAQAccordion',
+          block_title:bc.getAttribute('data-tapio-block-title')||question,
+          block_index:bc.getAttribute('data-tapio-block-index')?parseInt(bc.getAttribute('data-tapio-block-index')):null,
+          element_label:question
+        });
+      },true);
 
      // Click debounce map (300ms per element_id)
      var lastClick={};
